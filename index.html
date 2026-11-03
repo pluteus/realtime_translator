@@ -2,12 +2,12 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>同時通訳</title>
 <style>
   :root{ --bg:#0a0e14; --panel:#131922; --border:#263040; --accent:#4f9dff; --text:#e6edf3; --dim:#8b98a9; --ok:#3ddc84; --err:#ff5f6d; }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html,body{ margin:0; height:100%; background:var(--bg); color:var(--text);
+  html,body{ margin:0; height:100%; touch-action:pan-x pan-y; background:var(--bg); color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; }
   #app{ display:flex; flex-direction:column; height:100%; padding:calc(env(safe-area-inset-top,0px) + 10px) 12px calc(env(safe-area-inset-bottom,0px) + 10px); gap:10px; max-width:720px; margin:0 auto; }
   .row{ display:flex; gap:8px; align-items:center; }
@@ -32,7 +32,7 @@
   #settings.show{ display:block; }
   #settings .inner{ max-width:720px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
   label.f{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--dim); }
-  label.f input, label.f select{ font-size:14px; background:var(--panel); }
+  label.f input, label.f select{ font-size:16px; background:var(--panel); }
   .note{ font-size:11px; color:var(--dim); line-height:1.6; }
   .hidden{ display:none !important; }
 </style>
@@ -56,6 +56,10 @@
 
   <div class="row">
     <button id="btnConnect" class="primary" style="flex:1">🎙️ 接続</button>
+  </div>
+  <div class="row">
+    <input type="text" id="textIn" style="flex:1;min-width:0;font-size:16px" placeholder="文字で入力して通訳(接続後)" autocomplete="off" enterkeyhint="send">
+    <button id="btnSend">送信</button>
   </div>
   <div id="status">未接続</div>
   <div id="transcript"></div>
@@ -108,6 +112,8 @@
 </div>
 
 <script>
+['gesturestart','gesturechange','gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
+document.addEventListener('touchmove', e => { if(e.touches.length > 1) e.preventDefault(); }, { passive: false });
 (() => {
 'use strict';
 
@@ -354,7 +360,7 @@ function stopMic(){
 }
 
 /* ---------- 接続 ---------- */
-let ws = null, connProvider = null, orActive = false;
+let ws = null, connProvider = null, orActive = false, connReady = false;
 function buildInstructions(){
   return `「${$('langA').value}」と「${$('langB').value}」を相互通訳して。その際は通訳に徹して自身の考えを話さないで下さい。`;
 }
@@ -384,6 +390,7 @@ async function connect(){
 }
 
 function onConnected(){
+  connReady = true;
   setStatus('接続完了 — そのまま話してください');
   $('btnConnect').textContent = '🔌 切断';
   $('btnConnect').classList.add('connected');
@@ -536,22 +543,20 @@ function orFlush(){
   orBuf = []; orSpeaking = false; orSilence = 0; orLoud = 0;
   if(loud < 2){ setStatus('接続完了 — そのまま話してください'); return; }
   const b64 = pcmToWavB64(chunks, 16000);
+  const content = [{ type: 'text', text: 'この音声を通訳してください。' }, { type: 'input_audio', input_audio: { data: b64, format: 'wav' } }];
   setStatus('通訳中...');
   appendStream('in', '(音声を送信)'); endInTurn();
-  orChain = orChain.then(() => orRequest(b64)).catch(() => {}).then(() => { if(orActive && !orSpeaking) setStatus('接続完了 — そのまま話してください'); });
+  orChain = orChain.then(() => orRequest(content)).catch(() => {}).then(() => { if(orActive && !orSpeaking) setStatus('接続完了 — そのまま話してください'); });
 }
-async function orRequest(b64){
+async function orRequest(content){
   if(!orActive) return;
   const ctrl = new AbortController(); orAbort = ctrl;
   for(const withAudio of (audioOn ? [true, false] : [false])){
     const body = {
       model: orModel, stream: true,
       messages: [
-        { role: 'system', content: buildInstructions() + ' 入力は音声です。通訳結果の文だけを出力してください。' },
-        { role: 'user', content: [
-          { type: 'text', text: 'この音声を通訳してください。' },
-          { type: 'input_audio', input_audio: { data: b64, format: 'wav' } }
-        ] }
+        { role: 'system', content: buildInstructions() + ' 入力は音声またはテキストです。通訳結果の文だけを出力してください。' },
+        { role: 'user', content }
       ]
     };
     if(withAudio){ body.modalities = ['text', 'audio']; body.audio = { voice: 'alloy', format: 'pcm16' }; }
@@ -605,7 +610,7 @@ async function connectOpenRouter(key, model){
 
 /* --- 切断 --- */
 function cleanup(){
-  const s = ws; ws = null; orActive = false; orReset();
+  const s = ws; ws = null; orActive = false; connReady = false; orReset();
   if(s){ try{ s.close(); }catch(e){} }
   stopMic(); stopPlayback();
   curIn = curOut = null; curInBuf = curOutBuf = '';
@@ -615,6 +620,23 @@ function cleanup(){
   if($('status').textContent !== '接続失敗') setStatus('未接続');
 }
 
+function sendText(){
+  const t = $('textIn').value.trim(); if(!t) return;
+  if(!connReady){ addSys('先に「接続」してください'); return; }
+  if(orActive){
+    orChain = orChain.then(() => orRequest([{ type: 'text', text: t }])).catch(() => {});
+  }else if(ws && ws.readyState === WebSocket.OPEN){
+    if(connProvider === 'gemini') ws.send(JSON.stringify({ realtimeInput: { text: t } }));
+    else{
+      ws.send(JSON.stringify({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: t }] } }));
+      ws.send(JSON.stringify({ type: 'response.create' }));
+    }
+  }else{ addSys('先に「接続」してください'); return; }
+  endInTurn(); addLine('in', '🗣 ' + t);
+  $('textIn').value = '';
+}
+$('btnSend').addEventListener('click', sendText);
+$('textIn').addEventListener('keydown', (e) => { if(e.key === 'Enter' && !e.isComposing && e.keyCode !== 229){ e.preventDefault(); sendText(); } });
 $('btnConnect').addEventListener('click', () => { if(ws || orActive) cleanup(); else connect(); });
 
 // 初回: キー未設定なら案内
