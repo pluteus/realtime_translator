@@ -75,12 +75,22 @@
       </select>
     </label>
 
+    <div class="note">🔑 キー取得先: <a id="keyLink" href="#" target="_blank" rel="noopener" style="color:var(--accent)"></a></div>
+
     <label class="f">APIキー
       <input type="password" id="apiKey" autocomplete="off" placeholder="APIキーを入力">
     </label>
 
-    <label class="f">モデルID
+    <div class="row">
+      <button id="btnTest">🔌 接続テスト</button>
+      <span id="testResult" class="note"></span>
+    </div>
+
+    <label class="f">モデルID(空欄のまま接続テストするとモデル一覧を取得します)
       <input type="text" id="modelId" autocomplete="off" placeholder="モデルID">
+    </label>
+    <label class="f hidden" id="modelListWrap">取得したモデル一覧(選ぶと上に入力されます)
+      <select id="modelList"></select>
     </label>
 
     <div class="row">
@@ -119,6 +129,7 @@ const NOTES = {
   gemini: 'Gemini: Google AI Studio (https://aistudio.google.com/apikey) で発行したキーを使います。Live API対応モデルのIDを指定してください。',
   openai: 'ChatGPT: OpenAI Platform で発行したAPIキーを使います。Realtime API対応モデル(例: gpt-4o-realtime-preview, gpt-realtime など)のIDを指定してください。ブラウザから直接接続するため、キーの取り扱いにご注意ください。'
 };
+const KEY_LINKS = { gemini: 'https://aistudio.google.com/api-keys', openai: 'https://platform.openai.com/api-keys' };
 const KEY = 'interp.';
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -145,17 +156,68 @@ function loadProviderFields(){
   $('apiKey').value = store.get('key.' + p, '');
   $('modelId').value = store.get('model.' + p, DEFAULT_MODELS[p]);
   $('providerNote').textContent = NOTES[p];
+  $('modelId').placeholder = DEFAULT_MODELS[p];
+  const link = $('keyLink'); link.href = KEY_LINKS[p]; link.textContent = KEY_LINKS[p];
+  $('testResult').textContent = '';
+  $('modelListWrap').classList.add('hidden');
 }
 $('provider').value = store.get('provider', 'gemini');
 loadProviderFields();
 $('provider').addEventListener('change', () => { store.set('provider', $('provider').value); loadProviderFields(); });
 $('apiKey').addEventListener('change', () => store.set('key.' + $('provider').value, $('apiKey').value.trim()));
 $('modelId').addEventListener('change', () => {
-  const v = $('modelId').value.trim() || DEFAULT_MODELS[$('provider').value];
+  const v = $('modelId').value.trim(); // 空欄は許可(接続時は初期値を使用)
   $('modelId').value = v; store.set('model.' + $('provider').value, v);
+});
+$('modelList').addEventListener('change', () => {
+  if(!$('modelList').value) return;
+  $('modelId').value = $('modelList').value;
+  store.set('model.' + $('provider').value, $('modelId').value);
+});
+
+// 接続テスト: モデル一覧APIを呼んでキーの有効性を確認し、取得できた一覧をドロップダウンへ流し込む
+$('btnTest').addEventListener('click', async () => {
+  const p = $('provider').value;
+  const key = $('apiKey').value.trim();
+  const out = $('testResult');
+  if(!key){ out.textContent = '❌ APIキーを入力してください'; return; }
+  store.set('key.' + p, key);
+  out.textContent = 'テスト中...';
+  $('btnTest').disabled = true;
+  try{
+    let ids = [], filtered = [];
+    if(p === 'gemini'){
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', { headers: { 'x-goog-api-key': key } });
+      const d = await res.json().catch(() => ({}));
+      if(!res.ok) throw new Error((d.error && d.error.message) || ('HTTP ' + res.status));
+      const models = d.models || [];
+      ids = models.map(m => m.name.replace(/^models\//, ''));
+      filtered = models.filter(m => (m.supportedGenerationMethods || []).includes('bidiGenerateContent')).map(m => m.name.replace(/^models\//, ''));
+    }else{
+      const res = await fetch('https://api.openai.com/v1/models', { headers: { Authorization: 'Bearer ' + key } });
+      const d = await res.json().catch(() => ({}));
+      if(!res.ok) throw new Error((d.error && d.error.message) || ('HTTP ' + res.status));
+      ids = (d.data || []).map(m => m.id).sort();
+      filtered = ids.filter(id => /realtime/i.test(id));
+    }
+    const useFiltered = filtered.length > 0;
+    const list = useFiltered ? filtered : ids;
+    const sel = $('modelList');
+    sel.innerHTML = '';
+    const ph = document.createElement('option'); ph.value = ''; ph.textContent = '-- モデルを選択 --'; sel.appendChild(ph);
+    list.forEach(id => { const o = document.createElement('option'); o.value = o.textContent = id; sel.appendChild(o); });
+    $('modelListWrap').classList.remove('hidden');
+    const kind = useFiltered ? 'リアルタイム対応モデル' : '全モデル(リアルタイム対応の絞り込みに該当なし)';
+    out.textContent = `✅ 接続OK — ${kind} ${list.length}件を取得` + ($('modelId').value.trim() ? '' : '。モデルIDを一覧から選んでください');
+  }catch(err){
+    out.textContent = '❌ 接続失敗: ' + (err.message || err);
+  }
+  $('btnTest').disabled = false;
 });
 $('btnClearKey').addEventListener('click', () => { store.del('key.' + $('provider').value); $('apiKey').value = ''; });
 $('btnResetModel').addEventListener('click', () => { const p = $('provider').value; store.del('model.' + p); $('modelId').value = DEFAULT_MODELS[p]; });
+// 初回起動時のモデルID初期値(保存値がなければ初期値を入れる。空で保存した場合は空のまま)
+['gemini','openai'].forEach(p => { if(localStorage.getItem(KEY + 'model.' + p) === null) { /* loadProviderFieldsが初期値を表示 */ } });
 $('btnSettings').addEventListener('click', () => $('settings').classList.add('show'));
 $('btnCloseSettings').addEventListener('click', () => {
   $('apiKey').dispatchEvent(new Event('change')); $('modelId').dispatchEvent(new Event('change'));
@@ -267,7 +329,7 @@ function buildInstructions(){
 async function connect(){
   const provider = $('provider').value;
   const key = $('apiKey').value.trim() || store.get('key.' + provider, '');
-  const model = ($('modelId').value.trim() || store.get('model.' + provider, DEFAULT_MODELS[provider]));
+  const model = $('modelId').value.trim() || DEFAULT_MODELS[provider];
   if(!key){ addSys('設定画面でAPIキーを入力してください'); $('settings').classList.add('show'); return; }
   if($('langA').value === $('langB').value){ addSys('異なる2つの言語を選んでください'); return; }
 
