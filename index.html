@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>同時通訳</title>
+<style>
+  :root{ --bg:#0a0e14; --panel:#131922; --border:#263040; --accent:#4f9dff; --text:#e6edf3; --dim:#8b98a9; --ok:#3ddc84; --err:#ff5f6d; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; }
+  #app{ display:flex; flex-direction:column; height:100%; padding:calc(env(safe-area-inset-top,0px) + 10px) 12px calc(env(safe-area-inset-bottom,0px) + 10px); gap:10px; max-width:720px; margin:0 auto; }
+  .row{ display:flex; gap:8px; align-items:center; }
+  header{ display:flex; justify-content:space-between; align-items:center; }
+  h1{ font-size:16px; margin:0; }
+  button, select, input{ font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:9px 12px; }
+  button{ cursor:pointer; white-space:nowrap; }
+  button:active{ background:#1c2531; }
+  button.on{ border-color:var(--accent); color:var(--accent); }
+  button.primary{ background:#2f6fd0; border-color:#2f6fd0; font-weight:600; }
+  button.primary.connected{ background:#b33a45; border-color:#b33a45; }
+  select{ flex:1; min-width:0; }
+  #langBar{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; display:flex; gap:8px; align-items:center; }
+  #langBar select{ background:var(--bg); }
+  #status{ font-size:12px; color:var(--dim); min-height:16px; }
+  #transcript{ flex:1; overflow-y:auto; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px; font-size:15px; line-height:1.6; }
+  #transcript div{ white-space:pre-wrap; word-break:break-word; padding:4px 0; }
+  #transcript .in{ color:var(--dim); font-size:13px; }
+  #transcript .out{ color:var(--text); }
+  #transcript .sys{ color:var(--err); font-size:12px; }
+  #settings{ position:fixed; inset:0; background:var(--bg); z-index:10; overflow-y:auto; padding:calc(env(safe-area-inset-top,0px) + 12px) 14px 24px; display:none; }
+  #settings.show{ display:block; }
+  #settings .inner{ max-width:720px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+  label.f{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--dim); }
+  label.f input, label.f select{ font-size:14px; background:var(--panel); }
+  .note{ font-size:11px; color:var(--dim); line-height:1.6; }
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🌐 同時通訳</h1>
+    <div class="row">
+      <button id="btnAudio" title="通訳音声の再生ON/OFF">🔇 音声OFF</button>
+      <button id="btnClear" title="会話ウインドウを消去">🗑</button>
+      <button id="btnSettings">⚙ 設定</button>
+    </div>
+  </header>
+
+  <div id="langBar">
+    <select id="langA"></select>
+    <button id="btnSwap" title="入れ替え">⇄</button>
+    <select id="langB"></select>
+  </div>
+
+  <div class="row">
+    <button id="btnConnect" class="primary" style="flex:1">🎙️ 接続</button>
+  </div>
+  <div id="status">未接続</div>
+  <div id="transcript"></div>
+</div>
+
+<div id="settings">
+  <div class="inner">
+    <div class="row" style="justify-content:space-between">
+      <h1>⚙ 設定</h1>
+      <button id="btnCloseSettings">✕ 閉じる</button>
+    </div>
+
+    <label class="f">API提供元
+      <select id="provider">
+        <option value="gemini">Gemini (Live API)</option>
+        <option value="openai">ChatGPT (OpenAI Realtime API)</option>
+      </select>
+    </label>
+
+    <label class="f">APIキー
+      <input type="password" id="apiKey" autocomplete="off" placeholder="APIキーを入力">
+    </label>
+
+    <label class="f">モデルID
+      <input type="text" id="modelId" autocomplete="off" placeholder="モデルID">
+    </label>
+
+    <div class="row">
+      <button id="btnClearKey">🗑 この提供元のキーを消去</button>
+      <button id="btnResetModel">モデルIDを初期値に戻す</button>
+    </div>
+
+    <div class="note" id="providerNote"></div>
+    <div class="note">
+      ※ APIキー・モデルID・言語選択はこの端末のブラウザ内(localStorage)にのみ保存され、各提供元(Google / OpenAI)への通信以外には送信されません。共有PCでは使用後にキーを消去してください。<br>
+      ※ 通訳は「選んだ2言語の相互通訳」としてモデルに指示します。接続後にマイクへ話しかけると、通訳結果が会話ウインドウに文字で表示されます。音声も聞きたい場合は、トップ画面の「音声」ボタンをONにしてください(スピーカーの音をマイクが拾うとハウリングや誤反応が起きるため、イヤホン推奨)。
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ---------- 定義 ---------- */
+const LANGS = [
+  'アフリカーンス語','アカン語','アルバニア語','アムハラ語','アラビア語','アルメニア語','アゼルバイジャン語',
+  'バスク語','ベラルーシ語','ベンガル語','ブルガリア語','ミャンマー語(ビルマ語)','カタルーニャ語',
+  '中国語(簡体字)','中国語(繁体字)','クロアチア語','チェコ語','デンマーク語','オランダ語','英語',
+  'エストニア語','フィリピン語(タガログ語)','フィンランド語','フランス語','ガリシア語','ジョージア語',
+  'ドイツ語','ギリシャ語','グジャラート語','ハウサ語','ヘブライ語','ヒンディー語','ハンガリー語',
+  'アイスランド語','インドネシア語','イタリア語','日本語','ジャワ語','カンナダ語','カザフ語','クメール語',
+  'キニヤルワンダ語','韓国語','ラオ語','ラトビア語','リトアニア語','マケドニア語','マレー語',
+  'マラヤーラム語','マラーティー語','モンゴル語','ネパール語','ノルウェー語','ペルシャ語','ポーランド語',
+  'ポルトガル語(ブラジル)','ポルトガル語(ポルトガル)','パンジャブ語','ルーマニア語','ロシア語','セルビア語',
+  'シンド語','シンハラ語','スロバキア語','スロベニア語','スペイン語','スンダ語','スワヒリ語','スウェーデン語',
+  'タミル語','テルグ語','タイ語','トルコ語','ウクライナ語','ウルドゥー語','ウズベク語','ベトナム語','ズールー語'
+];
+const DEFAULT_MODELS = { gemini: 'gemini-3.1-flash-live-preview', openai: 'gpt-4o-realtime-preview' };
+const NOTES = {
+  gemini: 'Gemini: Google AI Studio (https://aistudio.google.com/apikey) で発行したキーを使います。Live API対応モデルのIDを指定してください。',
+  openai: 'ChatGPT: OpenAI Platform で発行したAPIキーを使います。Realtime API対応モデル(例: gpt-4o-realtime-preview, gpt-realtime など)のIDを指定してください。ブラウザから直接接続するため、キーの取り扱いにご注意ください。'
+};
+const KEY = 'interp.';
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(KEY + k); return v === null ? d : v; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(KEY + k, v); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(KEY + k); }catch(e){} }
+};
+
+/* ---------- 言語選択 ---------- */
+[$('langA'), $('langB')].forEach(sel => LANGS.forEach(n => { const o = document.createElement('option'); o.value = o.textContent = n; sel.appendChild(o); }));
+$('langA').value = store.get('langA', '日本語');
+$('langB').value = store.get('langB', '英語');
+$('langA').addEventListener('change', () => store.set('langA', $('langA').value));
+$('langB').addEventListener('change', () => store.set('langB', $('langB').value));
+$('btnSwap').addEventListener('click', () => {
+  const a = $('langA').value; $('langA').value = $('langB').value; $('langB').value = a;
+  store.set('langA', $('langA').value); store.set('langB', $('langB').value);
+  if(ws) addSys('言語の変更は次回の接続から反映されます');
+});
+
+/* ---------- 設定画面 ---------- */
+function loadProviderFields(){
+  const p = $('provider').value;
+  $('apiKey').value = store.get('key.' + p, '');
+  $('modelId').value = store.get('model.' + p, DEFAULT_MODELS[p]);
+  $('providerNote').textContent = NOTES[p];
+}
+$('provider').value = store.get('provider', 'gemini');
+loadProviderFields();
+$('provider').addEventListener('change', () => { store.set('provider', $('provider').value); loadProviderFields(); });
+$('apiKey').addEventListener('change', () => store.set('key.' + $('provider').value, $('apiKey').value.trim()));
+$('modelId').addEventListener('change', () => {
+  const v = $('modelId').value.trim() || DEFAULT_MODELS[$('provider').value];
+  $('modelId').value = v; store.set('model.' + $('provider').value, v);
+});
+$('btnClearKey').addEventListener('click', () => { store.del('key.' + $('provider').value); $('apiKey').value = ''; });
+$('btnResetModel').addEventListener('click', () => { const p = $('provider').value; store.del('model.' + p); $('modelId').value = DEFAULT_MODELS[p]; });
+$('btnSettings').addEventListener('click', () => $('settings').classList.add('show'));
+$('btnCloseSettings').addEventListener('click', () => {
+  $('apiKey').dispatchEvent(new Event('change')); $('modelId').dispatchEvent(new Event('change'));
+  $('settings').classList.remove('show');
+});
+
+/* ---------- 音声出力ON/OFF ---------- */
+let audioOn = store.get('audio', '0') === '1';
+function updateAudioBtn(){ $('btnAudio').textContent = audioOn ? '🔊 音声ON' : '🔇 音声OFF'; $('btnAudio').classList.toggle('on', audioOn); }
+updateAudioBtn();
+$('btnAudio').addEventListener('click', () => {
+  audioOn = !audioOn; store.set('audio', audioOn ? '1' : '0'); updateAudioBtn();
+  if(!audioOn) stopPlayback();
+  if(ws && ws.readyState === WebSocket.OPEN && connProvider === 'openai'){
+    ws.send(JSON.stringify({ type: 'session.update', session: { modalities: audioOn ? ['text','audio'] : ['text'] } }));
+  }
+  if(audioOn && playCtx && playCtx.state === 'suspended') playCtx.resume();
+});
+
+/* ---------- 会話ウインドウ ---------- */
+const tr = $('transcript');
+let curIn = null, curInBuf = '', curOut = null, curOutBuf = '';
+function scrollBottom(){ tr.scrollTop = tr.scrollHeight; }
+function appendStream(kind, text){
+  const isIn = kind === 'in';
+  let el = isIn ? curIn : curOut;
+  if(!el){
+    el = document.createElement('div'); el.className = isIn ? 'in' : 'out'; tr.appendChild(el);
+    if(isIn){ curIn = el; curInBuf = ''; } else { curOut = el; curOutBuf = ''; }
+  }
+  if(isIn){ curInBuf += text; el.textContent = '🗣 ' + curInBuf; }
+  else { curOutBuf += text; el.textContent = '🌐 ' + curOutBuf; }
+  scrollBottom();
+}
+function endOutTurn(){ curOut = null; curOutBuf = ''; }
+function endInTurn(){ curIn = null; curInBuf = ''; }
+function addLine(cls, text){ const d = document.createElement('div'); d.className = cls; d.textContent = text; tr.appendChild(d); scrollBottom(); }
+function addSys(t){ addLine('sys', t); }
+$('btnClear').addEventListener('click', () => { tr.innerHTML = ''; curIn = curOut = null; });
+function setStatus(t){ $('status').textContent = t; }
+
+/* ---------- 音声ユーティリティ ---------- */
+function bytesToB64(bytes){
+  let s = ''; const CH = 0x8000;
+  for(let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(s);
+}
+function floatToPcm16Bytes(f32){
+  const i16 = new Int16Array(f32.length);
+  for(let i = 0; i < f32.length; i++){ const s = Math.max(-1, Math.min(1, f32[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+  return new Uint8Array(i16.buffer);
+}
+
+let playCtx = null, nextPlayTime = 0, scheduled = [];
+function ensurePlayCtx(){
+  if(!playCtx){ playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 }); nextPlayTime = playCtx.currentTime; }
+  if(playCtx.state === 'suspended') playCtx.resume();
+}
+function playPcm24(b64){
+  if(!audioOn) return;
+  ensurePlayCtx();
+  const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const i16 = new Int16Array(bytes.buffer, 0, Math.floor(bytes.length / 2));
+  const f32 = new Float32Array(i16.length);
+  for(let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+  const buf = playCtx.createBuffer(1, f32.length, 24000);
+  buf.copyToChannel(f32, 0);
+  const src = playCtx.createBufferSource(); src.buffer = buf; src.connect(playCtx.destination);
+  const at = Math.max(playCtx.currentTime, nextPlayTime);
+  src.start(at); nextPlayTime = at + buf.duration;
+  scheduled.push(src);
+  src.onended = () => { const i = scheduled.indexOf(src); if(i >= 0) scheduled.splice(i, 1); };
+}
+function stopPlayback(){
+  scheduled.forEach(s => { try{ s.stop(); }catch(e){} }); scheduled = [];
+  if(playCtx) nextPlayTime = playCtx.currentTime;
+}
+function aiSpeaking(){ return playCtx && (scheduled.length > 0 || playCtx.currentTime < nextPlayTime + 0.3); }
+
+/* ---------- マイク ---------- */
+let micStream = null, capCtx = null, capProc = null;
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+async function startMic(sampleRate, onChunk){
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: !IS_ANDROID, noiseSuppression: false, autoGainControl: false } });
+  capCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+  const src = capCtx.createMediaStreamSource(micStream);
+  capProc = capCtx.createScriptProcessor(4096, 1, 1);
+  const mute = capCtx.createGain(); mute.gain.value = 0;
+  src.connect(capProc); capProc.connect(mute); mute.connect(capCtx.destination);
+  capProc.onaudioprocess = (e) => {
+    if(!ws || ws.readyState !== WebSocket.OPEN) return;
+    if(IS_ANDROID && audioOn && aiSpeaking()) return; // Androidではエコー対策としてAI発話中は送らない
+    onChunk(bytesToB64(floatToPcm16Bytes(e.inputBuffer.getChannelData(0))));
+  };
+}
+function stopMic(){
+  if(capProc){ try{ capProc.disconnect(); }catch(e){} capProc.onaudioprocess = null; capProc = null; }
+  if(capCtx){ try{ capCtx.close(); }catch(e){} capCtx = null; }
+  if(micStream){ micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+}
+
+/* ---------- 接続 ---------- */
+let ws = null, connProvider = null;
+function buildInstructions(){
+  return `「${$('langA').value}」と「${$('langB').value}」を相互通訳して。その際は通訳に徹して自身の考えを話さないで下さい。`;
+}
+
+async function connect(){
+  const provider = $('provider').value;
+  const key = $('apiKey').value.trim() || store.get('key.' + provider, '');
+  const model = ($('modelId').value.trim() || store.get('model.' + provider, DEFAULT_MODELS[provider]));
+  if(!key){ addSys('設定画面でAPIキーを入力してください'); $('settings').classList.add('show'); return; }
+  if($('langA').value === $('langB').value){ addSys('異なる2つの言語を選んでください'); return; }
+
+  connProvider = provider;
+  $('btnConnect').disabled = true;
+  // 自動再生制限の解除のため、クリック直後にAudioContextを用意
+  ensurePlayCtx();
+  setStatus('接続中...');
+  try{
+    if(provider === 'gemini') await connectGemini(key, model);
+    else await connectOpenAI(key, model);
+  }catch(err){
+    addSys('接続エラー: ' + (err.message || err));
+    setStatus('接続失敗');
+    cleanup();
+  }
+  $('btnConnect').disabled = false;
+}
+
+function onConnected(){
+  setStatus('接続完了 — そのまま話してください');
+  $('btnConnect').textContent = '🔌 切断';
+  $('btnConnect').classList.add('connected');
+}
+
+/* --- Gemini --- */
+async function mintToken(key){
+  const now = Date.now();
+  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/auth_tokens', {
+    method: 'POST',
+    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uses: 1, expireTime: new Date(now + 30*60*1000).toISOString(), newSessionExpireTime: new Date(now + 5*60*1000).toISOString() })
+  });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const d = await res.json(); if(!d.name) throw new Error('no token'); return d.name;
+}
+
+async function connectGemini(key, model){
+  let url;
+  try{
+    const tok = await mintToken(key);
+    url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(tok)}`;
+  }catch(e){
+    url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`;
+  }
+  const socket = new WebSocket(url);
+  ws = socket;
+  socket.addEventListener('open', () => {
+    socket.send(JSON.stringify({ setup: {
+      model: 'models/' + model,
+      generationConfig: { responseModalities: ['AUDIO'] },
+      systemInstruction: { parts: [{ text: buildInstructions() }] },
+      inputAudioTranscription: {}, outputAudioTranscription: {}
+    }}));
+  });
+  socket.addEventListener('message', async (e) => {
+    let text;
+    try{
+      text = typeof e.data === 'string' ? e.data : (e.data instanceof Blob ? await e.data.text() : new TextDecoder().decode(e.data));
+      const evt = JSON.parse(text);
+      if(evt.setupComplete){
+        onConnected();
+        await startMic(16000, (b64) => socket.send(JSON.stringify({ realtimeInput: { audio: { data: b64, mimeType: 'audio/pcm;rate=16000' } } })));
+        return;
+      }
+      const sc = evt.serverContent;
+      if(sc){
+        if(sc.interrupted){ stopPlayback(); endOutTurn(); }
+        if(sc.modelTurn && sc.modelTurn.parts) for(const p of sc.modelTurn.parts) if(p.inlineData && p.inlineData.data) playPcm24(p.inlineData.data);
+        if(sc.inputTranscription && sc.inputTranscription.text) appendStream('in', sc.inputTranscription.text);
+        if(sc.outputTranscription && sc.outputTranscription.text) appendStream('out', sc.outputTranscription.text);
+        if(sc.turnComplete){ endOutTurn(); endInTurn(); }
+      }else if(evt.error){
+        addSys('Geminiエラー: ' + JSON.stringify(evt.error));
+      }
+    }catch(err){ addSys('メッセージ処理エラー: ' + (err.message || err)); }
+  });
+  socket.addEventListener('error', () => { addSys('WebSocketエラー(APIキー・モデルIDをご確認ください)'); setStatus('接続失敗'); });
+  socket.addEventListener('close', (e) => {
+    if(ws !== socket) return;
+    if(e.code !== 1000) addSys(`切断されました (code: ${e.code}${e.reason ? ', ' + e.reason : ''})`);
+    cleanup();
+  });
+}
+
+/* --- OpenAI Realtime --- */
+async function connectOpenAI(key, model){
+  const url = 'wss://api.openai.com/v1/realtime?model=' + encodeURIComponent(model);
+  const socket = new WebSocket(url, ['realtime', 'openai-insecure-api-key.' + key, 'openai-beta.realtime-v1']);
+  ws = socket;
+  let started = false;
+  socket.addEventListener('message', async (e) => {
+    try{
+      const evt = JSON.parse(e.data);
+      switch(evt.type){
+        case 'session.created':
+          if(started) break; started = true;
+          socket.send(JSON.stringify({ type: 'session.update', session: {
+            instructions: buildInstructions(),
+            modalities: audioOn ? ['text','audio'] : ['text'],
+            input_audio_format: 'pcm16', output_audio_format: 'pcm16',
+            input_audio_transcription: { model: 'whisper-1' },
+            turn_detection: { type: 'server_vad' }
+          }}));
+          onConnected();
+          await startMic(24000, (b64) => socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64 })));
+          break;
+        case 'input_audio_buffer.speech_started':
+          stopPlayback(); break;
+        case 'conversation.item.input_audio_transcription.completed':
+          if(evt.transcript && evt.transcript.trim()){ endInTurn(); appendStream('in', evt.transcript.trim()); endInTurn(); }
+          break;
+        case 'response.text.delta':
+        case 'response.output_text.delta':
+        case 'response.audio_transcript.delta':
+        case 'response.output_audio_transcript.delta':
+          if(evt.delta) appendStream('out', evt.delta); break;
+        case 'response.audio.delta':
+        case 'response.output_audio.delta':
+          if(evt.delta) playPcm24(evt.delta); break;
+        case 'response.done':
+          endOutTurn(); break;
+        case 'error':
+          addSys('OpenAIエラー: ' + ((evt.error && evt.error.message) || JSON.stringify(evt.error))); break;
+      }
+    }catch(err){ addSys('メッセージ処理エラー: ' + (err.message || err)); }
+  });
+  socket.addEventListener('error', () => { addSys('WebSocketエラー(APIキー・モデルIDをご確認ください)'); setStatus('接続失敗'); });
+  socket.addEventListener('close', (e) => {
+    if(ws !== socket) return;
+    if(e.code !== 1000) addSys(`切断されました (code: ${e.code}${e.reason ? ', ' + e.reason : ''})`);
+    cleanup();
+  });
+}
+
+/* --- 切断 --- */
+function cleanup(){
+  const s = ws; ws = null;
+  if(s){ try{ s.close(); }catch(e){} }
+  stopMic(); stopPlayback();
+  curIn = curOut = null; curInBuf = curOutBuf = '';
+  $('btnConnect').textContent = '🎙️ 接続';
+  $('btnConnect').classList.remove('connected');
+  $('btnConnect').disabled = false;
+  if($('status').textContent !== '接続失敗') setStatus('未接続');
+}
+
+$('btnConnect').addEventListener('click', () => { if(ws) cleanup(); else connect(); });
+
+// 初回: キー未設定なら案内
+if(!store.get('key.' + $('provider').value, '')) setStatus('未接続 — ⚙設定でAPIキーを入力してください');
+})();
+</script>
+</body>
+</html>
