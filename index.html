@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>同時通訳</title>
+<meta name="theme-color" content="#0a0e14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="同時通訳">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
   :root{ --bg:#0a0e14; --panel:#131922; --border:#263040; --accent:#4f9dff; --text:#e6edf3; --dim:#8b98a9; --ok:#3ddc84; --err:#ff5f6d; }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -11,8 +19,12 @@
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; }
   #app{ display:flex; flex-direction:column; height:100%; padding:calc(env(safe-area-inset-top,0px) + 10px) 12px calc(env(safe-area-inset-bottom,0px) + 10px); gap:10px; max-width:720px; margin:0 auto; }
   .row{ display:flex; gap:8px; align-items:center; }
-  header{ display:flex; justify-content:space-between; align-items:center; }
+  header{ display:flex; justify-content:flex-end; align-items:center; }
+  header .row{ flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+  header button, header a.hbtn{ padding:8px 10px; }
   h1{ font-size:16px; margin:0; }
+  a.hbtn{ font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:9px 12px; text-decoration:none; white-space:nowrap; }
+  a.hbtn:active{ background:#1c2531; }
   button, select, input{ font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:9px 12px; }
   button{ cursor:pointer; white-space:nowrap; }
   button:active{ background:#1c2531; }
@@ -40,11 +52,12 @@
 <body>
 <div id="app">
   <header>
-    <h1>🌐 同時通訳</h1>
     <div class="row">
       <button id="btnAudio" title="通訳音声の再生ON/OFF">🔇 音声OFF</button>
       <button id="btnClear" title="会話ウインドウを消去">🗑</button>
+      <a id="btnHelp" class="hbtn" href="about.html" title="ヘルプ(アプリの説明)" aria-label="ヘルプ">❓</a>
       <button id="btnSettings">⚙ 設定</button>
+      <button id="btnFull" title="フルスクリーン" aria-label="フルスクリーン">⛶</button>
     </div>
   </header>
 
@@ -638,6 +651,25 @@ function sendText(){
 $('btnSend').addEventListener('click', sendText);
 $('textIn').addEventListener('keydown', (e) => { if(e.key === 'Enter' && !e.isComposing && e.keyCode !== 229){ e.preventDefault(); sendText(); } });
 $('btnConnect').addEventListener('click', () => { if(ws || orActive) cleanup(); else connect(); });
+
+/* ---------- フルスクリーン / PWA ---------- */
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const fsRoot = document.documentElement;
+const fsSupported = !!(fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen);
+const fsActive = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+if(isStandalone) $('btnFull').classList.add('hidden'); // ホーム画面から起動中はすでに全画面
+function updateFullBtn(){ $('btnFull').classList.toggle('on', fsActive()); }
+['fullscreenchange','webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, updateFullBtn));
+$('btnFull').addEventListener('click', () => {
+  if(!fsSupported){ addSys('このブラウザはフルスクリーンに対応していません。共有メニューの「ホーム画面に追加」で全画面表示にできます'); return; }
+  try{
+    if(fsActive()){ (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+    else{ const r = (fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen).call(fsRoot); if(r && r.catch) r.catch(() => addSys('フルスクリーンにできませんでした')); }
+  }catch(e){ addSys('フルスクリーンにできませんでした'); }
+});
+if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 
 // 初回: キー未設定なら案内
 if(!store.get('key.' + $('provider').value, '')) setStatus('未接続 — ⚙設定でAPIキーを入力してください');

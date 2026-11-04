@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>同時通訳 - アプリの説明</title>
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+  :root{ --bg:#0a0e14; --panel:#131922; --border:#263040; --accent:#4f9dff; --text:#e6edf3; --dim:#8b98a9; --ok:#3ddc84; --err:#ff5f6d; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif; line-height:1.75; }
+  main{ max-width:720px; margin:0 auto; padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 32px); }
+  nav{ display:flex; gap:8px; flex-wrap:wrap; }
+  a.btn{ display:inline-block; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:9px 14px; text-decoration:none; font-size:14px; }
+  a.btn.primary{ background:#2f6fd0; border-color:#2f6fd0; font-weight:600; }
+  h1{ font-size:22px; margin:20px 0 4px; }
+  .lead{ color:var(--dim); margin:0 0 8px; }
+  section{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-top:14px; }
+  h2{ font-size:16px; margin:0 0 8px; color:var(--accent); }
+  p{ margin:6px 0; font-size:14px; }
+  ul,ol{ margin:6px 0; padding-left:1.4em; font-size:14px; }
+  li{ margin:3px 0; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; display:block; overflow-x:auto; }
+  th,td{ border:1px solid var(--border); padding:6px 8px; text-align:left; vertical-align:top; }
+  th{ background:var(--bg); color:var(--dim); font-weight:600; white-space:nowrap; }
+  code{ background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:12px; word-break:break-all; }
+  .warn{ border-color:#6b3a40; }
+  .warn h2{ color:var(--err); }
+  footer{ margin-top:20px; }
+</style>
+</head>
+<body>
+<main>
+  <nav>
+    <a class="btn primary" href="index.html">🌐 アプリを開く</a>
+    <a class="btn" href="../index.html">☰ アプリ一覧へ</a>
+  </nav>
+
+  <h1>🌐 同時通訳</h1>
+  <p class="lead">マイクに話しかけるだけで、選んだ2つの言語を相互に通訳するWebアプリです。</p>
+
+  <section>
+    <h2>できること</h2>
+    <ul>
+      <li>約70言語から2つを選び、相互に通訳します(例: 日本語 ⇄ 英語)。どちらの言語で話しても、もう一方の言語に訳されます。</li>
+      <li>通訳結果は会話ウインドウに文字で表示されます。「音声」ボタンをONにすると、通訳の音声も再生されます。</li>
+      <li>接続ボタンの下の入力欄から、文字を入力して通訳することもできます。</li>
+      <li>通訳に使うAIは、Gemini・ChatGPT・OpenRouterから選べます。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>使い方</h2>
+    <ol>
+      <li>右上の「⚙ 設定」を開き、API提供元を選んでAPIキーを入力します。</li>
+      <li>「接続テスト」でキーが有効か確認します。モデルIDを空欄でテストすると、使えるモデルの一覧が出るので、そこから選べます。</li>
+      <li>画面上部で通訳したい2つの言語を選びます(⇄で入れ替えできます)。</li>
+      <li>「🎙️ 接続」を押し、マイクの使用を許可します。</li>
+      <li>「接続完了」と出たら、そのまま話してください。</li>
+      <li>終了するときは「🔌 切断」を押します。</li>
+    </ol>
+    <p>言語を変えたときは、Gemini・ChatGPTでは次回の接続から反映されます。OpenRouterではすぐに反映されます。</p>
+  </section>
+
+  <section>
+    <h2>3つの提供元の違い</h2>
+    <table>
+      <tr><th></th><th>Gemini</th><th>ChatGPT</th><th>OpenRouter</th></tr>
+      <tr><th>方式</th><td>Live API(リアルタイム)</td><td>Realtime API(リアルタイム)</td><td>話し終わりごとに音声を送信</td></tr>
+      <tr><th>遅延</th><td>小さい</td><td>小さい</td><td>やや大きい(約0.8秒の無音で区切るため)</td></tr>
+      <tr><th>原文の文字起こし</th><td>あり</td><td>あり</td><td>なし(「音声を送信」と表示)</td></tr>
+      <tr><th>モデル</th><td>Live API対応モデル</td><td>Realtime対応モデル</td><td>音声入力に対応した任意のモデル</td></tr>
+      <tr><th>キー取得先</th><td><a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener" style="color:var(--accent)">Google AI Studio</a></td><td><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style="color:var(--accent)">OpenAI Platform</a></td><td><a href="https://openrouter.ai/workspaces/default/keys" target="_blank" rel="noopener" style="color:var(--accent)">OpenRouter</a></td></tr>
+    </table>
+    <p>OpenRouterで音声ONにしても、モデルが音声出力に対応していない場合は、自動で文字のみの通訳になります。</p>
+  </section>
+
+  <section>
+    <h2>上手に使うコツ</h2>
+    <ul>
+      <li><b>イヤホンの使用をおすすめします。</b>スピーカーの音をマイクが拾うと、ハウリングや誤反応が起きます。</li>
+      <li>Androidでは、通訳音声の再生中はマイク入力を一時的に止めて、エコーを防いでいます。</li>
+      <li>通訳音声の途中で話し始めると、再生は中断されます。</li>
+      <li>静かな場所のほうが、聞き取りの精度が上がります。</li>
+    </ul>
+  </section>
+
+  <section class="warn">
+    <h2>プライバシーと注意</h2>
+    <ul>
+      <li>APIキー・モデルID・言語選択は、この端末のブラウザ内(localStorage)にだけ保存されます。</li>
+      <li>音声と文字は、選んだ提供元(Google / OpenAI / OpenRouter)への通信にだけ使われ、このアプリの運営者のサーバーには送られません。</li>
+      <li>ブラウザから直接APIに接続するため、キーの取り扱いにご注意ください。共有のパソコンでは、使用後に設定画面の「キーを消去」を押してください。</li>
+      <li>API利用料は、ご自身のアカウントに請求されます。</li>
+    </ul>
+  </section>
+
+  <footer>
+    <nav>
+      <a class="btn primary" href="index.html">🌐 アプリを開く</a>
+      <a class="btn" href="../index.html">☰ アプリ一覧へ</a>
+    </nav>
+  </footer>
+</main>
+</body>
+</html>
